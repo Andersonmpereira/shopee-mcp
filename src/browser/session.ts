@@ -27,6 +27,7 @@ const REGION_DEFAULTS: Record<string, Region> = {
   '.my': { locale: 'en-MY', timezone: 'Asia/Kuala_Lumpur', currency: 'MYR' },
   '.sg': { locale: 'en-SG', timezone: 'Asia/Singapore', currency: 'SGD' },
   '.tw': { locale: 'zh-TW', timezone: 'Asia/Taipei', currency: 'TWD' },
+  '.br': { locale: 'pt-BR', timezone: 'America/Sao_Paulo', currency: 'BRL' },
 };
 
 // Falls back to the Indonesian defaults, matching the default SHOPEE_DOMAIN.
@@ -97,7 +98,15 @@ async function createContext(headless: boolean): Promise<BrowserContext> {
  * `headless` overrides the env default (the login flow forces a visible window).
  */
 export async function getContext(headless: boolean = HEADLESS): Promise<BrowserContext> {
-  if (!contextPromise) contextPromise = createContext(headless);
+  if (!contextPromise) {
+    // A failed launch must not stick: Docker may start the browser before Xvfb
+    // is ready, and the next call has to be able to try again.
+    const pending = createContext(headless).catch((err) => {
+      if (contextPromise === pending) contextPromise = null;
+      throw err;
+    });
+    contextPromise = pending;
+  }
   return contextPromise;
 }
 
@@ -379,6 +388,20 @@ export async function isLoggedIn(): Promise<boolean> {
   const cookies = await ctx.cookies(BASE_URL);
   // Shopee sets SPC_U (user id) and SPC_EC (encrypted session) once authenticated.
   return cookies.some((c) => (c.name === 'SPC_U' || c.name === 'SPC_EC') && c.value.length > 4);
+}
+
+/**
+ * Open the shared browser on the virtual display. Signed out, show Shopee's
+ * login page so a noVNC viewer can sign in once; the persistent profile stores
+ * the cookies as they are set. Signed in, show the homepage.
+ */
+export async function ensureVisibleBrowser(): Promise<boolean> {
+  const ctx = await getContext(false);
+  const page = ctx.pages().find((p) => !p.isClosed()) ?? (await ctx.newPage());
+  const loggedIn = await isLoggedIn();
+  const target = loggedIn ? `${BASE_URL}/` : `${BASE_URL}/buyer/login`;
+  await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  return loggedIn;
 }
 
 /** Cleanly close the browser (used on shutdown / after login). */

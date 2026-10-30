@@ -5,6 +5,7 @@
  * Run with: npm run test:unit
  */
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { flattenSearchItems } from '../src/tools/search.js';
 import { formatPrice } from '../src/utils/price.js';
 import {
@@ -42,6 +43,15 @@ import { buildVariantRows } from '../src/tools/variants.js';
 import { shopeeCapture, requireLogin, ShopeeAuthRequiredError } from '../src/api/client.js';
 import { cache } from '../src/utils/cache.js';
 import { regionFor } from '../src/browser/session.js';
+import {
+  basicAuthorized,
+  bearerAuthorized,
+  httpAuthConfig,
+  httpListenPort,
+  isInitializeRequest,
+  mcpTransportMode,
+} from '../src/http/access.js';
+import { resolveSafePath } from '../src/http/static.js';
 import type { SearchItem, ItemBasic, PdpModel, PdpItem, Rating } from '../src/api/types.js';
 
 let failures = 0;
@@ -290,6 +300,10 @@ test('formatPrice: renders TWD with NT$ and no decimals', () => {
   assert.equal(formatPrice(50000000, 'TWD'), 'NT$500');
 });
 
+test('formatPrice: renders BRL with R$ and two decimals', () => {
+  assert.equal(formatPrice(1050000, 'BRL'), 'R$10,50');
+});
+
 test('formatPrice: falls back to "CURRENCY amount" for an unmapped currency', () => {
   assert.equal(formatPrice(500000000, 'USD'), 'USD 5.000');
 });
@@ -470,6 +484,14 @@ test('regionFor: .tw domains get Taiwanese locale/timezone/currency', () => {
     locale: 'zh-TW',
     timezone: 'Asia/Taipei',
     currency: 'TWD',
+  });
+});
+
+test('regionFor: .br domains get Brazilian locale/timezone/currency', () => {
+  assert.deepEqual(regionFor('shopee.com.br'), {
+    locale: 'pt-BR',
+    timezone: 'America/Sao_Paulo',
+    currency: 'BRL',
   });
 });
 
@@ -1063,6 +1085,67 @@ test('findCartItem: by item, by item+model, and ambiguous multi-variant lines', 
   assert.equal(ambiguous.item, undefined);
   assert.equal(ambiguous.matches.length, 2);
   assert.equal(findCartItem(blocks, '3').matches.length, 0);
+});
+
+// ─── HTTP access helpers (Docker / EasyPanel) ───────────────────────────────
+
+test('mcpTransportMode: only "http" leaves stdio', () => {
+  assert.equal(mcpTransportMode(undefined), 'stdio');
+  assert.equal(mcpTransportMode(''), 'stdio');
+  assert.equal(mcpTransportMode('HTTP'), 'http');
+  assert.equal(mcpTransportMode('stdio'), 'stdio');
+});
+
+test('httpListenPort: default, valid port, and rejection', () => {
+  assert.equal(httpListenPort(undefined), 8080);
+  assert.equal(httpListenPort(' 3000 '), 3000);
+  assert.throws(() => httpListenPort('0'), /Invalid MCP_PORT/);
+  assert.throws(() => httpListenPort('nope'), /Invalid MCP_PORT/);
+});
+
+test('httpAuthConfig: requires token and UI password, defaults the user', () => {
+  assert.deepEqual(httpAuthConfig({ MCP_AUTH_TOKEN: 'tok', UI_PASSWORD: 'pw' }), {
+    token: 'tok',
+    user: 'shopee',
+    password: 'pw',
+  });
+  assert.equal(
+    httpAuthConfig({ MCP_AUTH_TOKEN: 'tok', UI_USER: 'ana', UI_PASSWORD: 'pw' }).user,
+    'ana',
+  );
+  assert.throws(() => httpAuthConfig({ UI_PASSWORD: 'pw' }), /MCP_AUTH_TOKEN/);
+  assert.throws(() => httpAuthConfig({ MCP_AUTH_TOKEN: 'tok' }), /UI_PASSWORD/);
+});
+
+test('bearerAuthorized: matches only the full Bearer token', () => {
+  assert.equal(bearerAuthorized('Bearer secret', 'secret'), true);
+  assert.equal(bearerAuthorized('Bearer secret', 'secre'), false);
+  assert.equal(bearerAuthorized('secret', 'secret'), false);
+  assert.equal(bearerAuthorized(undefined, 'secret'), false);
+});
+
+test('basicAuthorized: decodes user:password and allows a colon in the password', () => {
+  const header = `Basic ${Buffer.from('shopee:p:w').toString('base64')}`;
+  assert.equal(basicAuthorized(header, 'shopee', 'p:w'), true);
+  assert.equal(basicAuthorized(header, 'shopee', 'pw'), false);
+  assert.equal(basicAuthorized(undefined, 'shopee', 'pw'), false);
+  assert.equal(basicAuthorized('Bearer x', 'shopee', 'pw'), false);
+});
+
+test('isInitializeRequest: single message and batch', () => {
+  assert.equal(isInitializeRequest({ method: 'initialize' }), true);
+  assert.equal(isInitializeRequest({ method: 'tools/call' }), false);
+  assert.equal(isInitializeRequest([{ method: 'initialize' }]), true);
+  assert.equal(isInitializeRequest(null), false);
+});
+
+test('resolveSafePath: stays inside the root', () => {
+  const root = path.resolve('/tmp/novnc');
+  assert.equal(resolveSafePath(root, '/vnc.html'), path.join(root, 'vnc.html'));
+  assert.equal(resolveSafePath(root, '/app/ui.js'), path.join(root, 'app', 'ui.js'));
+  assert.equal(resolveSafePath(root, '/../etc/passwd'), undefined);
+  assert.equal(resolveSafePath(root, '/%2e%2e/etc/passwd'), undefined);
+  assert.equal(resolveSafePath(root, '/%00vnc.html'), undefined);
 });
 
 await runTests();

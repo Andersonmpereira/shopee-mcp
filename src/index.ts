@@ -1,66 +1,36 @@
 #!/usr/bin/env node
 import 'dotenv/config';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { registerSearchTools } from './tools/search.js';
-import { registerProductTools } from './tools/product.js';
-import { registerVariantTools } from './tools/variants.js';
-import { registerStatusTools } from './tools/status.js';
-import { registerReviewTools } from './tools/reviews.js';
-import { registerShopTools } from './tools/shop.js';
-import { registerFlashSaleTools } from './tools/flashsale.js';
-import { registerCartTools } from './tools/cart.js';
-import { registerAccountTools } from './tools/account.js';
-import { registerActionTools } from './tools/actions.js';
-import { accountToolsSetting, initAccountMode, refreshAccountMode } from './account-mode.js';
+import { accountToolsSetting, refreshAccountMode } from './account-mode.js';
+import { openVisibleSession } from './browser/visible.js';
 import { closeContext, DEBUG } from './browser/session.js';
-
-// Read the version from package.json at runtime so it can't drift from the
-// published package version (this file previously hardcoded a stale string).
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as {
-  version: string;
-};
+import { mcpTransportMode } from './http/access.js';
+import { startHttpServer } from './http/server.js';
+import { createMcpServer } from './server.js';
 
 async function main() {
-  const server = new McpServer({
-    name: 'shopee-mcp',
-    version: pkg.version,
-  });
+  const server = createMcpServer();
 
-  // Register tool groups. Every tool runs through the shared, logged-in browser
-  // session (see src/browser/session.ts) — sign in once with `npm run login`.
-  registerSearchTools(server);
-  registerProductTools(server);
-  registerVariantTools(server);
-  registerReviewTools(server);
-  registerShopTools(server);
-  registerFlashSaleTools(server);
-  registerStatusTools(server);
-  // Experimental account tools (reads of the user's own data, and the only
-  // tools that modify the account). Registered hidden; account mode shows them
-  // once the session is confirmed logged in (see src/account-mode.ts).
-  initAccountMode(server);
-  registerAccountTools(server);
-  registerCartTools(server);
-  registerActionTools(server);
+  if (mcpTransportMode(process.env.MCP_TRANSPORT) === 'http') {
+    await startHttpServer(server);
+    if (process.env.SHOPEE_ENSURE_VISIBLE === 'true') openVisibleSession();
+    return;
+  }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // Check the session in the background so a logged-in user gets the account
-  // tools without calling anything first; clients are notified via list_changed.
-  if (accountToolsSetting() === 'auto') void refreshAccountMode();
+  if (process.env.SHOPEE_ENSURE_VISIBLE === 'true') {
+    openVisibleSession();
+  } else if (accountToolsSetting() === 'auto') {
+    void refreshAccountMode();
+  }
 
   if (DEBUG) {
     process.stderr.write('[shopee-mcp] Server started via stdio (browser-backed discovery)\n');
   }
 }
 
-// Tidy up the browser on shutdown.
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     void closeContext().finally(() => process.exit(0));

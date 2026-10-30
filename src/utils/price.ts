@@ -15,6 +15,7 @@ const CURRENCY_FORMATS: Record<string, CurrencyFormat> = {
   MYR: { symbol: 'RM', locale: 'en-MY', decimals: 2 },
   SGD: { symbol: 'S$', locale: 'en-SG', decimals: 2 },
   TWD: { symbol: 'NT$', locale: 'zh-TW', decimals: 0 },
+  BRL: { symbol: 'R$', locale: 'pt-BR', decimals: 2 },
 };
 
 /** Render a raw Shopee price (real amount × 100000) for display. */
