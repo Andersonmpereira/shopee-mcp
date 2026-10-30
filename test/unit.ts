@@ -5,6 +5,8 @@
  * Run with: npm run test:unit
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { flattenSearchItems } from '../src/tools/search.js';
 import { formatPrice } from '../src/utils/price.js';
@@ -42,6 +44,7 @@ import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { buildVariantRows } from '../src/tools/variants.js';
 import { shopeeCapture, requireLogin, ShopeeAuthRequiredError } from '../src/api/client.js';
 import { cache } from '../src/utils/cache.js';
+import { clearProfileLocks } from '../src/browser/profile-lock.js';
 import { regionFor } from '../src/browser/session.js';
 import {
   basicAuthorized,
@@ -1146,6 +1149,20 @@ test('resolveSafePath: stays inside the root', () => {
   assert.equal(resolveSafePath(root, '/../etc/passwd'), undefined);
   assert.equal(resolveSafePath(root, '/%2e%2e/etc/passwd'), undefined);
   assert.equal(resolveSafePath(root, '/%00vnc.html'), undefined);
+});
+
+test('clearProfileLocks removes Chrome singleton files and ignores a clean profile', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shopee-locks-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'SingletonLock'), '2f5262a4f492-1149');
+    fs.writeFileSync(path.join(dir, 'SingletonCookie'), 'x');
+    const removed = clearProfileLocks(dir);
+    assert.deepEqual(removed.sort(), ['SingletonCookie', 'SingletonLock']);
+    assert.equal(fs.existsSync(path.join(dir, 'SingletonLock')), false);
+    assert.deepEqual(clearProfileLocks(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 await runTests();

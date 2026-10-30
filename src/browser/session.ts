@@ -3,6 +3,7 @@ import 'dotenv/config';
 import os from 'node:os';
 import path from 'node:path';
 import type { BrowserContext, Page, Response } from 'playwright';
+import { clearProfileLocks } from './profile-lock.js';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -75,12 +76,21 @@ function debug(msg: string): void {
 
 let contextPromise: Promise<BrowserContext> | null = null;
 
-async function createContext(headless: boolean): Promise<BrowserContext> {
+function isProfileLockError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('profile appears to be in use');
+}
+
+async function launchContext(headless: boolean): Promise<BrowserContext> {
+  const removed = clearProfileLocks(PROFILE_DIR);
+  if (removed.length > 0) {
+    process.stderr.write(`[shopee-mcp] Removed stale Chrome profile lock: ${removed.join(', ')}\n`);
+  }
   debug(
     `Launching CloakBrowser (headless=${headless}, locale=${LOCALE}, tz=${TIMEZONE}) ` +
       `with profile: ${PROFILE_DIR}`,
   );
-  const ctx = (await launchPersistentContext({
+  return (await launchPersistentContext({
     userDataDir: PROFILE_DIR,
     headless,
     userAgent: USER_AGENT,
@@ -90,7 +100,22 @@ async function createContext(headless: boolean): Promise<BrowserContext> {
     humanize: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })) as unknown as BrowserContext;
-  return ctx;
+}
+
+async function createContext(headless: boolean): Promise<BrowserContext> {
+  const attempts = 5;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await launchContext(headless);
+    } catch (err) {
+      if (!isProfileLockError(err) || attempt === attempts) throw err;
+      process.stderr.write(
+        `[shopee-mcp] Chrome profile is locked by another container. Retry ${attempt}/${attempts}.\n`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+  }
+  throw new Error('Chrome profile stayed locked');
 }
 
 /**
