@@ -33,7 +33,18 @@ export SHOPEE_ENSURE_VISIBLE=true
 export MCP_TRANSPORT=http
 
 mkdir -p "$SHOPEE_PROFILE_DIR" /tmp/vnc
+# The profile is on a volume. Chrome records the previous container hostname in
+# these locks, so the next deploy refuses to open ("profile in use on another
+# computer") and the noVNC screen stays empty.
+rm -f \
+  "$SHOPEE_PROFILE_DIR/SingletonLock" \
+  "$SHOPEE_PROFILE_DIR/SingletonSocket" \
+  "$SHOPEE_PROFILE_DIR/SingletonCookie"
 chown -R node:node "$SHOPEE_PROFILE_DIR" /tmp/vnc
+
+# fluxbox calls fbsetbg on an empty desktop and pops a dialog. Nothing to set.
+printf '%s\n' '#!/bin/sh' 'exit 0' > /usr/bin/fbsetbg
+chmod 755 /usr/bin/fbsetbg
 
 gosu node Xvfb "$DISPLAY" -screen 0 1600x900x24 -ac +extension GLX +render -noreset \
   >/tmp/xvfb.log 2>&1 &

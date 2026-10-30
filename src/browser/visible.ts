@@ -14,11 +14,12 @@ export function openVisibleSession(): void {
 }
 
 async function run(): Promise<void> {
-  let loggedIn = false;
+  let loggedIn: boolean;
   try {
     loggedIn = await ensureVisibleBrowser();
   } catch (err) {
     process.stderr.write(`[shopee-mcp] Could not open the Shopee window: ${err}\n`);
+    return;
   }
 
   if (accountToolsSetting() === 'auto') await refreshAccountMode();
