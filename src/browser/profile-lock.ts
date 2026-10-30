@@ -12,7 +12,7 @@ export function clearProfileLocks(profileDir: string): string[] {
   const removed: string[] = [];
   for (const name of LOCK_NAMES) {
     const file = path.join(profileDir, name);
-    let detail = name;
+    let detail: string = name;
     try {
       if (fs.lstatSync(file).isSymbolicLink()) {
         detail = `${name} -> ${fs.readlinkSync(file)}`;
